@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "Feedback": {
+      "title": "Feedback",
+      "description": "User feedback and ratings for advice received.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The UID of the user who provided the feedback."
+        },
+        "adviceId": {
+          "type": "string",
+          "description": "A unique identifier for the advice session."
+        },
+        "rating": {
+          "type": "integer",
+          "description": "The rating from 1 to 5."
+        },
+        "comment": {
+          "type": "string",
+          "description": "Optional text feedback from the user."
+        },
+        "mode": {
+          "type": "string",
+          "description": "The perspective mode used (e.g., Coach, Friend)."
+        },
+        "need": {
+          "type": "string",
+          "description": "The user's selected need."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the feedback was submitted."
+        }
+      },
+      "required": ["uid", "adviceId", "rating", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Collection of user feedback entries."
+    }
+  }
+}
