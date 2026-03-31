@@ -230,6 +230,7 @@ function App() {
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [adviceId, setAdviceId] = useState<string | null>(null);
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
 
   const audioRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -413,7 +414,22 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
 
   const copyMantra = (text: string) => {
     navigator.clipboard.writeText(text);
-    // Could add a toast here, but for now we'll just use a simple feedback
+  };
+
+  const shareMantra = async (text: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'My Pivot Mantra',
+          text: `"${text}" — Found my clarity on Pivot.`,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      copyMantra(text);
+    }
   };
 
   const reset = () => {
@@ -750,15 +766,15 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
 
             <section className="space-y-4">
               <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C]">What would help most right now?</label>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                 {NEEDS.map((n) => (
                   <button
                     key={n}
                     onClick={() => setNeed(n)}
-                    className={`px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+                    className={`px-3 py-3 rounded-xl text-[11px] font-bold uppercase tracking-wider border transition-all text-center flex items-center justify-center leading-tight ${
                       need === n 
-                        ? 'bg-[#5A6B5D] text-white border-[#5A6B5D]' 
-                        : 'bg-white border-[#DDE2D9] hover:border-[#5A6B5D] text-[#3A4439]'
+                        ? 'bg-[#5A6B5D] text-white border-[#5A6B5D] shadow-md' 
+                        : 'bg-white border-[#DDE2D9] hover:border-[#5A6B5D] text-[#7A857C]'
                     }`}
                   >
                     {n}
@@ -781,6 +797,9 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                   placeholder="Describe your situation..."
                   className="w-full h-48 md:h-40 p-5 md:p-6 rounded-3xl border border-[#DDE2D9] bg-white focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439]"
                 />
+                <p className="mt-2 text-[10px] text-[#7A857C] italic opacity-60 text-center">
+                  Your questions are not stored to ensure your privacy.
+                </p>
                 <div className="absolute bottom-4 left-4 md:left-6 flex items-center gap-3">
                   <AnimatePresence>
                     {isListening && activeInput === 'main' && (
@@ -905,6 +924,9 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                       placeholder="Your thoughts..."
                       className="w-full p-5 md:p-6 rounded-3xl border border-[#DDE2D9] bg-white focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439] h-32 md:h-auto"
                     />
+                    <p className="mt-2 text-[10px] text-[#7A857C] italic opacity-60 text-center">
+                      Your thoughts are not stored to ensure your privacy.
+                    </p>
                     <div className="absolute bottom-4 left-4 md:left-6 flex items-center gap-3">
                       <AnimatePresence>
                         {isListening && activeInput === 'followup' && (
@@ -986,13 +1008,22 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                   <div className="pt-6 border-t border-white/10 space-y-4">
                     <div className="flex justify-between items-center">
                       <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Mantra</h3>
-                      <button 
-                        onClick={() => copyMantra(followUp.mantra)}
-                        className="text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors flex items-center gap-2"
-                        aria-label="Copy mantra to clipboard"
-                      >
-                        Copy <Copy className="w-3 h-3" />
-                      </button>
+                      <div className="flex items-center gap-4">
+                        <button 
+                          onClick={() => copyMantra(followUp.mantra)}
+                          className="text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors flex items-center gap-2"
+                          aria-label="Copy mantra to clipboard"
+                        >
+                          Copy <Copy className="w-3 h-3" />
+                        </button>
+                        <button 
+                          onClick={() => shareMantra(followUp.mantra)}
+                          className="text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors flex items-center gap-2"
+                          aria-label="Share mantra"
+                        >
+                          Share <Globe className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-xl md:text-2xl font-serif italic text-white">
                       "{followUp.mantra}"
@@ -1098,9 +1129,67 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
       </main>
 
       {/* Footer */}
-      <footer className="max-w-3xl mx-auto px-6 py-12 text-center text-[10px] text-[#7A857C] uppercase tracking-[0.2em] opacity-50">
-        Pivot Assistant • Grounded Advice for Human Beings
+      <footer className="max-w-3xl mx-auto px-6 py-12 space-y-6">
+        <div className="flex justify-center gap-8">
+          <button 
+            onClick={() => setIsPrivacyModalOpen(true)}
+            className="text-[10px] text-[#7A857C] uppercase tracking-[0.2em] hover:text-[#3A4439] transition-colors"
+          >
+            Privacy & Security
+          </button>
+        </div>
+        <div className="text-center text-[10px] text-[#7A857C] uppercase tracking-[0.2em] opacity-50">
+          Pivot Assistant • Grounded Advice for Human Beings
+        </div>
       </footer>
+
+      {/* Privacy Modal */}
+      <AnimatePresence>
+        {isPrivacyModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPrivacyModalOpen(false)}
+              className="absolute inset-0 bg-[#3A4439]/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white max-w-lg w-full p-8 md:p-12 rounded-[40px] shadow-2xl border border-[#DDE2D9] space-y-8"
+            >
+              <div className="space-y-4">
+                <h2 className="text-3xl font-serif italic text-[#3A4439]">Privacy First</h2>
+                <div className="space-y-4 text-[#5A6B5D] text-sm leading-relaxed">
+                  <p>
+                    Pivot was built with a simple philosophy: your personal reflections should remain yours.
+                  </p>
+                  <div className="space-y-2">
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-[#7A857C]">No Storage</h3>
+                    <p>We do not store the situations you describe or the thoughts you share in follow-up conversations. They exist only for the duration of your session.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-[#7A857C]">Feedback & Improvement</h3>
+                    <p>If you choose to submit feedback, we store your rating and optional comment to help improve the assistant. This is the only data we persist.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-[#7A857C]">Secure Processing</h3>
+                    <p>Your inputs are processed securely via Google's Gemini API to provide grounded, thoughtful advice.</p>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsPrivacyModalOpen(false)}
+                className="w-full bg-[#5A6B5D] text-white py-4 rounded-2xl font-bold uppercase tracking-widest hover:scale-[1.02] transition-all"
+              >
+                I Understand
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 {
-  "name": "Pivot - Life Advice Assistant",
+  "name": "Pivot",
   "description": "A short-form life advice assistant that helps you think clearly and take one useful next step.",
-  "requestFramePermissions": ["microphone"]
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
