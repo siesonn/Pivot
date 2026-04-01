@@ -240,6 +240,7 @@ function App() {
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [adviceId, setAdviceId] = useState<string | null>(null);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
   const audioRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -250,6 +251,10 @@ function App() {
   useEffect(() => {
     activeInputRef.current = activeInput;
   }, [activeInput]);
+
+  useEffect(() => {
+    document.title = "Pivot";
+  }, []);
 
   useEffect(() => {
     if (darkMode) {
@@ -335,13 +340,21 @@ function App() {
   const logout = () => signOut(auth);
 
   const getAdvice = async () => {
-    if (!input.trim()) return;
+    if (!input.trim()) {
+      setSpeechError("Please describe your situation first.");
+      return;
+    }
+    if (isLoading) return;
+    
     setIsLoading(true);
+    setSpeechError(null);
+    setGeneralError(null);
     setAdvice(null);
     setFollowUp(null);
     setFeedbackSubmitted(false);
     setRating(0);
     setComment('');
+
     const newAdviceId = Math.random().toString(36).substring(7);
     setAdviceId(newAdviceId);
 
@@ -374,21 +387,43 @@ Question to Think About:
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to get advice');
+        let errorMsg = 'Failed to get advice';
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          errorMsg = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
       const text = data.text || '';
-      const sections = text.split('\n\n');
       
-      const insight = sections.find(s => s.startsWith('Quick Insight:'))?.replace('Quick Insight:', '').trim() || '';
-      const step = sections.find(s => s.startsWith('One Small Step:'))?.replace('One Small Step:', '').trim() || '';
-      const question = sections.find(s => s.startsWith('Question to Think About:'))?.replace('Question to Think About:', '').trim() || '';
+      if (!text) throw new Error('Received empty response from server');
 
-      setAdvice({ insight, step, question });
+      // More robust parsing using regex to find sections regardless of exact formatting
+      const insightMatch = text.match(/(?:Quick Insight:?|Insight:?)\s*([\s\S]*?)(?=\n\n|\nOne Small Step:|\nStep:|\nQuestion to Think About:|$)/i);
+      const stepMatch = text.match(/(?:One Small Step:?|Step:?)\s*([\s\S]*?)(?=\n\n|\nQuestion to Think About:|\nQuestion:|$)/i);
+      const questionMatch = text.match(/(?:Question to Think About:?|Question:?)\s*([\s\S]*?)$/i);
+
+      const insight = insightMatch ? insightMatch[1].trim() : '';
+      const step = stepMatch ? stepMatch[1].trim() : '';
+      const question = questionMatch ? questionMatch[1].trim() : '';
+
+      if (!insight && !step && !question) {
+        // Fallback to simple split if regex fails
+        const sections = text.split(/\n\n|\n(?=[A-Z])/);
+        const fallbackInsight = sections[0]?.replace(/^(Quick Insight:?|Insight:?)\s*/i, '').trim() || '';
+        const fallbackStep = sections[1]?.replace(/^(One Small Step:?|Step:?)\s*/i, '').trim() || '';
+        const fallbackQuestion = sections[2]?.replace(/^(Question to Think About:?|Question:?)\s*/i, '').trim() || '';
+        setAdvice({ insight: fallbackInsight, step: fallbackStep, question: fallbackQuestion });
+      } else {
+        setAdvice({ insight, step, question });
+      }
     } catch (error: any) {
       console.error("Error fetching advice:", error);
+      setGeneralError(error.message || "Something went wrong while getting advice. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -397,6 +432,7 @@ Question to Think About:
   const getFollowUp = async () => {
     if (!followUpInput.trim() || !advice) return;
     setIsFollowUpLoading(true);
+    setGeneralError(null);
 
     try {
       const prompt = `Original Situation: ${input}\nYour Advice: ${advice.insight}\nStep: ${advice.step}\nQuestion: ${advice.question}\nUser Response to Question: ${followUpInput}`;
@@ -415,15 +451,31 @@ Avoid clichés. Focus on helping the user move forward with clarity.`;
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to get follow-up');
+        let errorMsg = 'Failed to get follow-up';
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          errorMsg = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
-      const parsedData = JSON.parse(data.text || '{}');
-      setFollowUp(parsedData);
+      try {
+        const parsedData = JSON.parse(data.text || '{}');
+        setFollowUp(parsedData);
+      } catch (e) {
+        console.error("Failed to parse JSON response:", data.text);
+        // Fallback if model doesn't return valid JSON despite instruction
+        setFollowUp({
+          finalThought: data.text?.substring(0, 200) || "I've processed your thoughts. Let's keep moving forward.",
+          mantra: "Stay focused on your path."
+        });
+      }
     } catch (error: any) {
       console.error("Error fetching follow-up:", error);
+      setGeneralError(error.message || "Something went wrong. Please try again.");
     } finally {
       setIsFollowUpLoading(false);
     }
@@ -730,15 +782,15 @@ Avoid clichés. Focus on helping the user move forward with clarity.`;
       <main className="max-w-3xl mx-auto px-5 py-8 md:py-12 space-y-10 md:space-y-12">
         {/* Error Toast */}
         <AnimatePresence>
-          {speechError && (
+          {(speechError || generalError) && (
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm flex justify-between items-center"
             >
-              <span>{speechError}</span>
-              <button onClick={() => setSpeechError(null)} className="font-bold ml-4">✕</button>
+              <span>{speechError || generalError}</span>
+              <button onClick={() => { setSpeechError(null); setGeneralError(null); }} className="font-bold ml-4">✕</button>
             </motion.div>
           )}
         </AnimatePresence>

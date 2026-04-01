@@ -27,13 +27,15 @@ async function startServer() {
       const apiKey = process.env.GEMINI_API_KEY;
 
       if (!apiKey) {
+        console.error('GEMINI_API_KEY is missing');
         return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
       }
 
+      console.log('Generating content for prompt:', prompt.substring(0, 50) + '...');
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: responseModalities?.includes('AUDIO') ? 'gemini-2.5-flash-preview-tts' : 'gemini-3-flash-preview',
-        contents: prompt,
+        contents: [{ parts: [{ text: prompt }] }],
         config: {
           systemInstruction,
           responseMimeType: responseMimeType || 'text/plain',
@@ -45,12 +47,19 @@ async function startServer() {
         },
       });
 
+      if (!response.candidates || response.candidates.length === 0) {
+        throw new Error('No candidates returned from Gemini API');
+      }
+
       if (responseModalities?.includes('AUDIO')) {
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        const base64Audio = response.candidates[0].content?.parts?.[0]?.inlineData?.data;
+        if (!base64Audio) throw new Error('No audio data returned');
         return res.json({ audio: base64Audio });
       }
 
-      res.json({ text: response.text });
+      const text = response.text || '';
+      console.log('Generation successful, text length:', text.length);
+      res.json({ text });
     } catch (error: any) {
       console.error('Generation error:', error);
       res.status(500).json({ error: error.message || 'Failed to generate content' });
@@ -59,11 +68,19 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+      console.log('Vite middleware enabled');
+    } catch (e) {
+      console.error('Failed to start Vite server:', e);
+      // Fallback to static serving if Vite fails
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+    }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
