@@ -6,10 +6,22 @@
   --font-serif: "Playfair Display", serif;
 }
 
+@variant dark (&:where(.dark, .dark *));
+
 body {
   background-image: url("https://www.transparenttextures.com/patterns/natural-paper.png");
+  @apply bg-[#F5F7F4] text-[#3A4439] transition-colors duration-300;
+}
+
+.dark body {
+  background-image: url("https://www.transparenttextures.com/patterns/dark-matter.png");
+  @apply bg-[#1A1F1A] text-[#EDF1EB];
 }
 
 .selection-bg {
   background-color: rgba(90, 107, 93, 0.05);
+}
+
+.dark .selection-bg {
+  background-color: rgba(144, 169, 147, 0.05);
 }

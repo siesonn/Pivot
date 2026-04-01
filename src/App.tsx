@@ -4,7 +4,6 @@
  */
 
 import React, { useState, useRef, useEffect, Component } from 'react';
-import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { 
   MessageSquare, 
   Zap, 
@@ -22,7 +21,9 @@ import {
   LogOut,
   LogIn,
   Send,
-  Copy
+  Copy,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -129,13 +130,13 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       }
 
       return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F8F9F5] p-6">
-          <div className="max-w-md w-full bg-white p-8 rounded-[32px] border border-[#DDE2D9] shadow-xl text-center space-y-6">
-            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
+        <div className="min-h-screen flex items-center justify-center bg-[#F8F9F5] dark:bg-[#1A1F1A] p-6 transition-colors duration-300">
+          <div className="max-w-md w-full bg-white dark:bg-[#242B24] p-8 rounded-[32px] border border-[#DDE2D9] dark:border-[#2D342D] shadow-xl text-center space-y-6">
+            <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-full flex items-center justify-center mx-auto">
               <ShieldAlert className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-serif italic text-[#3A4439]">Oops, something happened</h2>
-            <p className="text-[#7A857C] text-sm leading-relaxed">
+            <h2 className="text-2xl font-serif italic text-[#3A4439] dark:text-[#EDF1EB]">Oops, something happened</h2>
+            <p className="text-[#7A857C] dark:text-[#A0A9A2] text-sm leading-relaxed">
               {errorMessage}
             </p>
             <button 
@@ -192,7 +193,7 @@ const Waveform = () => (
           repeat: Infinity,
           delay: i * 0.1,
         }}
-        className="w-1 bg-[#5A6B5D] rounded-full"
+        className="w-1 bg-[#5A6B5D] dark:bg-[#90A993] rounded-full"
       />
     ))}
   </div>
@@ -219,6 +220,14 @@ function App() {
   const [loadingSection, setLoadingSection] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('darkMode');
+      if (saved !== null) return saved === 'true';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
   const [activeInput, setActiveInput] = useState<'main' | 'followup' | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
   
@@ -241,10 +250,17 @@ function App() {
   useEffect(() => {
     activeInputRef.current = activeInput;
   }, [activeInput]);
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', darkMode.toString());
+  }, [darkMode]);
   
   const responseRef = useRef<HTMLDivElement>(null);
-
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
   // Auth Listener
   useEffect(() => {
@@ -330,11 +346,8 @@ function App() {
     setAdviceId(newAdviceId);
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Mode: ${mode}\nNeed: ${need}\nSituation: ${input}`,
-        config: {
-          systemInstruction: `You are Pivot, a life advice assistant. Your job is to help users move forward with clarity through calm, grounded language and thoughtful perspective.
+      const prompt = `Mode: ${mode}\nNeed: ${need}\nSituation: ${input}`;
+      const systemInstruction = `You are Pivot, a life advice assistant. Your job is to help users move forward with clarity through calm, grounded language and thoughtful perspective.
 Avoid clichés or overly motivational language. Focus on practical guidance.
 
 Adapt your response based on the selected mode:
@@ -352,11 +365,21 @@ One Small Step:
 [1 clear action]
 
 Question to Think About:
-[1 thoughtful follow-up question]`,
-        },
+[1 thoughtful follow-up question]`;
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, systemInstruction }),
       });
 
-      const text = response.text || '';
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get advice');
+      }
+
+      const data = await response.json();
+      const text = data.text || '';
       const sections = text.split('\n\n');
       
       const insight = sections.find(s => s.startsWith('Quick Insight:'))?.replace('Quick Insight:', '').trim() || '';
@@ -364,7 +387,7 @@ Question to Think About:
       const question = sections.find(s => s.startsWith('Question to Think About:'))?.replace('Question to Think About:', '').trim() || '';
 
       setAdvice({ insight, step, question });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching advice:", error);
     } finally {
       setIsLoading(false);
@@ -376,36 +399,30 @@ Question to Think About:
     setIsFollowUpLoading(true);
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          { text: `Original Situation: ${input}` },
-          { text: `Your Advice: ${advice.insight}\nStep: ${advice.step}\nQuestion: ${advice.question}` },
-          { text: `User Response to Question: ${followUpInput}` }
-        ],
-        config: {
-          systemInstruction: `You are Pivot. The user has responded to your follow-up question.
-Provide a response with two parts:
-1. "Final Thought": A max 3-4 sentence reflection that ties the insight and action together.
-2. "Mantra": A very short, memorable one-sentence mantra (e.g., "Clarity comes through action.") that reinforces the mindset.
+      const prompt = `Original Situation: ${input}\nYour Advice: ${advice.insight}\nStep: ${advice.step}\nQuestion: ${advice.question}\nUser Response to Question: ${followUpInput}`;
+      const systemInstruction = `You are Pivot. The user has responded to your follow-up question.
+Provide a response in JSON format with two fields:
+1. "finalThought": A max 3-4 sentence reflection that ties the insight and action together.
+2. "mantra": A very short, memorable one-sentence mantra (e.g., "Clarity comes through action.") that reinforces the mindset.
 
 Keep the tone calm, grounded, and consistent with the selected mode: ${mode}.
-Avoid clichés. Focus on helping the user move forward with clarity.`,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              finalThought: { type: Type.STRING },
-              mantra: { type: Type.STRING }
-            },
-            required: ["finalThought", "mantra"]
-          }
-        },
+Avoid clichés. Focus on helping the user move forward with clarity.`;
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, systemInstruction, responseMimeType: 'application/json' }),
       });
 
-      const data = JSON.parse(response.text || '{}');
-      setFollowUp(data);
-    } catch (error) {
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get follow-up');
+      }
+
+      const data = await response.json();
+      const parsedData = JSON.parse(data.text || '{}');
+      setFollowUp(parsedData);
+    } catch (error: any) {
       console.error("Error fetching follow-up:", error);
     } finally {
       setIsFollowUpLoading(false);
@@ -520,20 +537,26 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
         'Big Picture': 'Kore'
       };
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: text,
+          responseModalities: ['AUDIO'],
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: voiceMap[mode] || 'Kore' },
             },
           },
-        },
+        }),
       });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!response.ok) {
+        throw new Error('Failed to generate audio');
+      }
+
+      const data = await response.json();
+      const base64Audio = data.audio;
       if (base64Audio) {
         await playPCM(base64Audio);
       }
@@ -654,21 +677,21 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9F5] text-[#3A4439] font-sans selection:bg-[#E0E4DE]">
+    <div className="min-h-screen bg-[#F8F9F5] dark:bg-[#1A1F1A] text-[#3A4439] dark:text-[#EDF1EB] font-sans selection:bg-[#E0E4DE] dark:selection:bg-[#3A4439] transition-colors duration-300">
       {/* Header */}
-      <header className="max-w-3xl mx-auto px-5 pt-8 pb-8 md:pt-12 md:pb-10 border-b border-[#DDE2D9]">
+      <header className="max-w-3xl mx-auto px-5 pt-8 pb-8 md:pt-12 md:pb-10 border-b border-[#DDE2D9] dark:border-[#2D342D]">
         <div className="flex flex-col md:flex-row justify-between items-start gap-6 mb-6">
           <div>
-            <h1 className="text-4xl md:text-5xl font-serif italic tracking-tight text-[#3A4439]">Pivot</h1>
-            <p className="text-base md:text-lg text-[#5A6B5D] font-serif italic mt-1 md:mt-2">Because sometimes in life, you just need to pivot.</p>
+            <h1 className="text-4xl md:text-5xl font-serif italic tracking-tight text-[#3A4439] dark:text-[#EDF1EB]">Pivot</h1>
+            <p className="text-base md:text-lg text-[#5A6B5D] dark:text-[#90A993] font-serif italic mt-1 md:mt-2">Because sometimes in life, you just need to pivot.</p>
           </div>
           <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between md:justify-end">
             {user ? (
               <div className="flex items-center gap-3">
-                <img src={user.photoURL || ''} alt={user.displayName || ''} className="w-7 h-7 md:w-8 md:h-8 rounded-full border border-[#DDE2D9]" />
+                <img src={user.photoURL || ''} alt={user.displayName || ''} className="w-7 h-7 md:w-8 md:h-8 rounded-full border border-[#DDE2D9] dark:border-[#2D342D]" />
                 <button 
                   onClick={logout}
-                  className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#7A857C] hover:text-[#3A4439] transition-colors"
+                  className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2] hover:text-[#3A4439] dark:hover:text-[#EDF1EB] transition-colors"
                 >
                   Logout
                 </button>
@@ -676,14 +699,22 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
             ) : (
               <button 
                 onClick={login}
-                className="flex items-center gap-2 text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#7A857C] hover:text-[#3A4439] transition-colors"
+                className="flex items-center gap-2 text-[10px] md:text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2] hover:text-[#3A4439] dark:hover:text-[#EDF1EB] transition-colors"
               >
                 <LogIn className="w-4 h-4" /> Login
               </button>
             )}
             <button 
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 hover:bg-[#EDF1EB] dark:hover:bg-[#3A4439] rounded-full transition-colors text-[#7A857C] dark:text-[#A0A9A2]"
+              title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <button 
               onClick={reset}
-              className="p-2 hover:bg-[#EDF1EB] rounded-full transition-colors text-[#7A857C]"
+              className="p-2 hover:bg-[#EDF1EB] dark:hover:bg-[#3A4439] rounded-full transition-colors text-[#7A857C] dark:text-[#A0A9A2]"
               title="Start Over"
               aria-label="Start a new session"
             >
@@ -691,7 +722,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
             </button>
           </div>
         </div>
-        <p className="text-xs md:text-sm text-[#7A857C] leading-relaxed max-w-2xl">
+        <p className="text-xs md:text-sm text-[#7A857C] dark:text-[#A0A9A2] leading-relaxed max-w-2xl">
           Share what is on your mind and Pivot will offer a perspective, a practical next step, and a question to help you think more clearly.
         </p>
       </header>
@@ -704,7 +735,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex justify-between items-center"
+              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm flex justify-between items-center"
             >
               <span>{speechError}</span>
               <button onClick={() => setSpeechError(null)} className="font-bold ml-4">✕</button>
@@ -721,10 +752,10 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
             <div className="relative">
               <div className="w-16 h-16 border-4 border-[#5A6B5D]/20 border-t-[#5A6B5D] rounded-full animate-spin" />
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-8 h-8 bg-[#5A6B5D]/10 rounded-full animate-pulse" />
+                <div className="w-8 h-8 bg-[#5A6B5D]/10 dark:bg-[#90A993]/10 rounded-full animate-pulse" />
               </div>
             </div>
-            <p className="text-lg font-serif italic text-[#5A6B5D] animate-pulse">
+            <p className="text-lg font-serif italic text-[#5A6B5D] dark:text-[#90A993] animate-pulse">
               {loadingMessage}
             </p>
           </motion.div>
@@ -738,7 +769,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
             className="space-y-10"
           >
             <section className="space-y-4">
-              <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C]">Choose a perspective</label>
+              <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2]">Choose a perspective</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {MODES.map((m) => (
                   <button
@@ -747,15 +778,15 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                     className={`flex items-center gap-3 p-4 rounded-2xl border transition-all text-left ${
                       mode === m.id 
                         ? 'bg-[#5A6B5D] text-white border-[#5A6B5D] shadow-lg' 
-                        : 'bg-white border-[#DDE2D9] hover:border-[#5A6B5D] text-[#3A4439]'
+                        : 'bg-white dark:bg-[#242B24] border-[#DDE2D9] dark:border-[#2D342D] hover:border-[#5A6B5D] text-[#3A4439] dark:text-[#EDF1EB]'
                     }`}
                   >
-                    <div className={mode === m.id ? 'text-white' : 'text-[#7A857C]'}>
+                    <div className={mode === m.id ? 'text-white' : 'text-[#7A857C] dark:text-[#A0A9A2]'}>
                       {m.icon}
                     </div>
                     <div>
                       <div className="font-medium text-sm">{m.id}</div>
-                      <div className={`text-[10px] opacity-70 ${mode === m.id ? 'text-white' : 'text-[#7A857C]'}`}>
+                      <div className={`text-[10px] opacity-70 ${mode === m.id ? 'text-white' : 'text-[#7A857C] dark:text-[#A0A9A2]'}`}>
                         {m.description}
                       </div>
                     </div>
@@ -765,7 +796,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
             </section>
 
             <section className="space-y-4">
-              <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C]">What would help most right now?</label>
+              <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2]">What would help most right now?</label>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                 {NEEDS.map((n) => (
                   <button
@@ -774,7 +805,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                     className={`px-3 py-3 rounded-xl text-[11px] font-bold uppercase tracking-wider border transition-all text-center flex items-center justify-center leading-tight ${
                       need === n 
                         ? 'bg-[#5A6B5D] text-white border-[#5A6B5D] shadow-md' 
-                        : 'bg-white border-[#DDE2D9] hover:border-[#5A6B5D] text-[#7A857C]'
+                        : 'bg-white dark:bg-[#242B24] border-[#DDE2D9] dark:border-[#2D342D] hover:border-[#5A6B5D] text-[#7A857C] dark:text-[#A0A9A2]'
                     }`}
                   >
                     {n}
@@ -785,8 +816,8 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
 
             <section className="space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-1">
-                <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C]">What's on your mind?</label>
-                <p className="text-[9px] md:text-[10px] text-[#7A857C] italic opacity-70">
+                <label className="text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2]">What's on your mind?</label>
+                <p className="text-[9px] md:text-[10px] text-[#7A857C] dark:text-[#A0A9A2] italic opacity-70">
                   Tap the microphone to record. Press the arrow to send.
                 </p>
               </div>
@@ -795,9 +826,9 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Describe your situation..."
-                  className="w-full h-48 md:h-40 p-5 md:p-6 rounded-3xl border border-[#DDE2D9] bg-white focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439]"
+                  className="w-full h-48 md:h-40 p-5 md:p-6 rounded-3xl border border-[#DDE2D9] dark:border-[#2D342D] bg-white dark:bg-[#242B24] focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439] dark:text-[#EDF1EB]"
                 />
-                <p className="mt-2 text-[10px] text-[#7A857C] italic opacity-60 text-center">
+                <p className="mt-2 text-[10px] text-[#7A857C] dark:text-[#A0A9A2] italic opacity-60 text-center">
                   Your questions are not stored to ensure your privacy.
                 </p>
                 <div className="absolute bottom-4 left-4 md:left-6 flex items-center gap-3">
@@ -807,10 +838,10 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -10 }}
-                        className="flex items-center gap-2 md:gap-3 bg-[#EDF1EB] px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-[#DDE2D9]"
+                        className="flex items-center gap-2 md:gap-3 bg-[#EDF1EB] dark:bg-[#2D342D] px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-[#DDE2D9] dark:border-[#3A4439]"
                       >
                         <Waveform />
-                        <span className="text-[9px] md:text-xs font-bold uppercase tracking-widest text-[#5A6B5D] animate-pulse">Recording...</span>
+                        <span className="text-[9px] md:text-xs font-bold uppercase tracking-widest text-[#5A6B5D] dark:text-[#90A993] animate-pulse">Recording...</span>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -821,7 +852,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                     className={`p-3 md:p-4 rounded-2xl transition-all shadow-xl ${
                       isListening && activeInput === 'main'
                         ? 'bg-[#5A6B5D] text-white ring-4 ring-[#5A6B5D]/20'
-                        : 'bg-white text-[#3A4439] border border-[#DDE2D9] hover:border-[#5A6B5D]'
+                        : 'bg-white dark:bg-[#242B24] text-[#3A4439] dark:text-[#EDF1EB] border border-[#DDE2D9] dark:border-[#2D342D] hover:border-[#5A6B5D]'
                     }`}
                     title={isListening ? "Stop Listening" : "Voice Input"}
                     aria-label={isListening ? "Stop voice recording" : "Start voice recording"}
@@ -852,7 +883,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
               className="space-y-12 pb-24"
             >
               {/* Context Summary */}
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#7A857C] opacity-50">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2] opacity-50">
                 <span>{mode} Mode</span>
                 <span>•</span>
                 <span>{need}</span>
@@ -861,7 +892,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
               {/* Insight */}
               <section className="space-y-4 md:space-y-6">
                 <div className="flex justify-between items-center">
-                  <h2 className="font-serif italic text-xl md:text-2xl text-[#7A857C]">Quick Insight</h2>
+                  <h2 className="font-serif italic text-xl md:text-2xl text-[#7A857C] dark:text-[#A0A9A2]">Quick Insight</h2>
                   <div className="flex items-center gap-3">
                     <AnimatePresence>
                       {isAudioLoading && loadingSection === 'insight' && (
@@ -869,7 +900,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                           initial={{ opacity: 0, x: 10 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: 10 }}
-                          className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest text-[#5A6B5D] animate-pulse"
+                          className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest text-[#5A6B5D] dark:text-[#90A993] animate-pulse"
                         >
                           Preparing audio...
                         </motion.span>
@@ -878,7 +909,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                     <button 
                       onClick={() => generateSpeech(advice.insight, 'insight')}
                       disabled={isAudioLoading && loadingSection !== 'insight'}
-                      className={`p-2 rounded-full transition-all ${isPlaying && loadingSection === 'insight' ? 'bg-[#5A6B5D] text-white' : 'hover:bg-[#EDF1EB] text-[#7A857C]'}`}
+                      className={`p-2 rounded-full transition-all ${isPlaying && loadingSection === 'insight' ? 'bg-[#5A6B5D] text-white' : 'hover:bg-[#EDF1EB] dark:hover:bg-[#2D342D] text-[#7A857C] dark:text-[#A0A9A2]'}`}
                       title="Listen"
                       aria-label="Listen to insight"
                     >
@@ -886,33 +917,33 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                     </button>
                   </div>
                 </div>
-                <p className="text-xl md:text-2xl leading-relaxed font-serif text-[#3A4439]">
+                <p className="text-xl md:text-2xl leading-relaxed font-serif text-[#3A4439] dark:text-[#EDF1EB]">
                   {advice.insight}
                 </p>
               </section>
 
               {/* Small Step */}
-              <section className="bg-[#EDF1EB] p-6 md:p-10 rounded-[32px] md:rounded-[40px] space-y-4 md:space-y-6 border border-[#DDE2D9]">
-                <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#7A857C]">One Small Step</h2>
+              <section className="bg-[#EDF1EB] dark:bg-[#242B24] p-6 md:p-10 rounded-[32px] md:rounded-[40px] space-y-4 md:space-y-6 border border-[#DDE2D9] dark:border-[#2D342D]">
+                <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#7A857C] dark:text-[#A0A9A2]">One Small Step</h2>
                 <div className="flex items-start gap-4 md:gap-6">
                   <div className="bg-[#5A6B5D] text-white p-2.5 md:p-3 rounded-xl md:rounded-2xl mt-1 shadow-sm shrink-0">
                     <Zap className="w-4 h-4 md:w-5 md:h-5" />
                   </div>
-                  <p className="text-xl md:text-2xl font-medium leading-tight text-[#3A4439]">
+                  <p className="text-xl md:text-2xl font-medium leading-tight text-[#3A4439] dark:text-[#EDF1EB]">
                     {advice.step}
                   </p>
                 </div>
               </section>
 
               {/* Question */}
-              <section className="space-y-6 md:space-y-8 pt-10 md:pt-16 border-t border-[#DDE2D9]">
+              <section className="space-y-6 md:space-y-8 pt-10 md:pt-16 border-t border-[#DDE2D9] dark:border-[#2D342D]">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-1">
-                  <h2 className="font-serif italic text-xl md:text-2xl text-[#7A857C]">Question to Think About</h2>
-                  <p className="text-[9px] md:text-[10px] text-[#7A857C] italic opacity-70">
+                  <h2 className="font-serif italic text-xl md:text-2xl text-[#7A857C] dark:text-[#A0A9A2]">Question to Think About</h2>
+                  <p className="text-[9px] md:text-[10px] text-[#7A857C] dark:text-[#A0A9A2] italic opacity-70">
                     Tap the microphone to record. Press the arrow to send.
                   </p>
                 </div>
-                <p className="text-2xl md:text-3xl leading-relaxed font-serif italic text-[#3A4439]">
+                <p className="text-2xl md:text-3xl leading-relaxed font-serif italic text-[#3A4439] dark:text-[#EDF1EB]">
                   "{advice.question}"
                 </p>
 
@@ -922,9 +953,9 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                       value={followUpInput}
                       onChange={(e) => setFollowUpInput(e.target.value)}
                       placeholder="Your thoughts..."
-                      className="w-full p-5 md:p-6 rounded-3xl border border-[#DDE2D9] bg-white focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439] h-32 md:h-auto"
+                      className="w-full p-5 md:p-6 rounded-3xl border border-[#DDE2D9] dark:border-[#2D342D] bg-white dark:bg-[#242B24] focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-base md:text-lg font-serif italic text-[#3A4439] dark:text-[#EDF1EB] h-32 md:h-auto"
                     />
-                    <p className="mt-2 text-[10px] text-[#7A857C] italic opacity-60 text-center">
+                    <p className="mt-2 text-[10px] text-[#7A857C] dark:text-[#A0A9A2] italic opacity-60 text-center">
                       Your thoughts are not stored to ensure your privacy.
                     </p>
                     <div className="absolute bottom-4 left-4 md:left-6 flex items-center gap-3">
@@ -934,10 +965,10 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: -10 }}
-                            className="flex items-center gap-2 md:gap-3 bg-[#EDF1EB] px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-[#DDE2D9]"
+                            className="flex items-center gap-2 md:gap-3 bg-[#EDF1EB] dark:bg-[#2D342D] px-3 md:px-4 py-1.5 md:py-2 rounded-full border border-[#DDE2D9] dark:border-[#3A4439]"
                           >
                             <Waveform />
-                            <span className="text-[9px] md:text-xs font-bold uppercase tracking-widest text-[#5A6B5D] animate-pulse">Recording...</span>
+                            <span className="text-[9px] md:text-xs font-bold uppercase tracking-widest text-[#5A6B5D] dark:text-[#90A993] animate-pulse">Recording...</span>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -948,7 +979,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                         className={`p-3 md:p-4 rounded-2xl transition-all shadow-xl ${
                           isListening && activeInput === 'followup'
                             ? 'bg-[#5A6B5D] text-white ring-4 ring-[#5A6B5D]/20'
-                            : 'bg-white text-[#3A4439] border border-[#DDE2D9] hover:border-[#5A6B5D]'
+                            : 'bg-white dark:bg-[#242B24] text-[#3A4439] dark:text-[#EDF1EB] border border-[#DDE2D9] dark:border-[#2D342D] hover:border-[#5A6B5D]'
                         }`}
                         title={isListening ? "Stop Listening" : "Voice Input"}
                         aria-label={isListening ? "Stop voice recording" : "Start voice recording"}
@@ -973,7 +1004,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                 <motion.section 
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="bg-[#3A4439] text-[#F8F9F5] p-6 md:p-10 rounded-[32px] md:rounded-[40px] space-y-6 shadow-2xl"
+                  className="bg-[#3A4439] text-[#F8F9F5] p-6 md:p-10 rounded-[32px] md:rounded-[40px] space-y-6 shadow-2xl border border-white/5 dark:border-white/10"
                 >
                   <div className="flex justify-between items-center">
                     <h2 className="text-[10px] font-bold uppercase tracking-widest opacity-50">Final Thought</h2>
@@ -1047,11 +1078,11 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
               <motion.section 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="pt-12 border-t border-[#DDE2D9] space-y-6"
+                className="pt-12 border-t border-[#DDE2D9] dark:border-[#2D342D] space-y-6"
               >
                 <div className="text-center space-y-2">
-                  <h3 className="font-serif italic text-xl text-[#7A857C]">How was this advice?</h3>
-                  <p className="text-xs text-[#7A857C] uppercase tracking-widest">Your feedback helps Pivot improve</p>
+                  <h3 className="font-serif italic text-xl text-[#7A857C] dark:text-[#A0A9A2]">How was this advice?</h3>
+                  <p className="text-xs text-[#7A857C] dark:text-[#A0A9A2] uppercase tracking-widest">Your feedback helps Pivot improve</p>
                 </div>
 
                 {!feedbackSubmitted ? (
@@ -1068,8 +1099,8 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                           <Star 
                             className={`w-8 h-8 ${
                               (hoverRating || rating) >= star 
-                                ? 'fill-[#5A6B5D] text-[#5A6B5D]' 
-                                : 'text-[#DDE2D9]'
+                                ? 'fill-[#5A6B5D] dark:fill-[#90A993] text-[#5A6B5D] dark:text-[#90A993]' 
+                                : 'text-[#DDE2D9] dark:text-[#2D342D]'
                             }`} 
                           />
                         </button>
@@ -1083,8 +1114,8 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                         className="space-y-4"
                       >
                         {!user ? (
-                          <div className="text-center p-6 bg-white border border-[#DDE2D9] rounded-3xl space-y-3">
-                            <p className="text-sm text-[#7A857C]">Please login to submit feedback</p>
+                          <div className="text-center p-6 bg-white dark:bg-[#242B24] border border-[#DDE2D9] dark:border-[#2D342D] rounded-3xl space-y-3">
+                            <p className="text-sm text-[#7A857C] dark:text-[#A0A9A2]">Please login to submit feedback</p>
                             <button 
                               onClick={login}
                               className="bg-[#5A6B5D] text-white px-6 py-2 rounded-full text-sm font-bold uppercase tracking-widest hover:scale-105 transition-all"
@@ -1098,7 +1129,7 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                               value={comment}
                               onChange={(e) => setComment(e.target.value)}
                               placeholder="Any additional thoughts? (Optional)"
-                              className="w-full p-4 rounded-2xl border border-[#DDE2D9] bg-white focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-sm font-serif italic text-[#3A4439]"
+                              className="w-full p-4 rounded-2xl border border-[#DDE2D9] dark:border-[#2D342D] bg-white dark:bg-[#242B24] focus:ring-2 focus:ring-[#5A6B5D] focus:border-transparent outline-none transition-all resize-none text-sm font-serif italic text-[#3A4439] dark:text-[#EDF1EB]"
                               rows={3}
                             />
                             <button
@@ -1117,9 +1148,9 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="text-center p-8 bg-[#EDF1EB] rounded-[40px] border border-[#DDE2D9]"
+                    className="text-center p-8 bg-[#EDF1EB] dark:bg-[#242B24] rounded-[40px] border border-[#DDE2D9] dark:border-[#2D342D]"
                   >
-                    <p className="font-serif italic text-[#5A6B5D] text-lg">Thank you for your feedback. It means a lot.</p>
+                    <p className="font-serif italic text-[#5A6B5D] dark:text-[#90A993] text-lg">Thank you for your feedback. It means a lot.</p>
                   </motion.div>
                 )}
               </motion.section>
@@ -1133,12 +1164,12 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
         <div className="flex justify-center gap-8">
           <button 
             onClick={() => setIsPrivacyModalOpen(true)}
-            className="text-[10px] text-[#7A857C] uppercase tracking-[0.2em] hover:text-[#3A4439] transition-colors"
+            className="text-[10px] text-[#7A857C] dark:text-[#A0A9A2] uppercase tracking-[0.2em] hover:text-[#3A4439] dark:hover:text-[#EDF1EB] transition-colors"
           >
             Privacy & Security
           </button>
         </div>
-        <div className="text-center text-[10px] text-[#7A857C] uppercase tracking-[0.2em] opacity-50">
+        <div className="text-center text-[10px] text-[#7A857C] dark:text-[#A0A9A2] uppercase tracking-[0.2em] opacity-50">
           Pivot Assistant • Grounded Advice for Human Beings
         </div>
       </footer>
@@ -1152,22 +1183,22 @@ Avoid clichés. Focus on helping the user move forward with clarity.`,
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsPrivacyModalOpen(false)}
-              className="absolute inset-0 bg-[#3A4439]/40 backdrop-blur-sm"
+              className="absolute inset-0 bg-[#3A4439]/40 dark:bg-black/60 backdrop-blur-sm"
             />
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative bg-white max-w-lg w-full p-8 md:p-12 rounded-[40px] shadow-2xl border border-[#DDE2D9] space-y-8"
+              className="relative bg-white dark:bg-[#1A1F1A] max-w-lg w-full p-8 md:p-12 rounded-[40px] shadow-2xl border border-[#DDE2D9] dark:border-[#2D342D] space-y-8"
             >
               <div className="space-y-4">
-                <h2 className="text-3xl font-serif italic text-[#3A4439]">Privacy First</h2>
-                <div className="space-y-4 text-[#5A6B5D] text-sm leading-relaxed">
+                <h2 className="text-3xl font-serif italic text-[#3A4439] dark:text-[#EDF1EB]">Privacy First</h2>
+                <div className="space-y-4 text-[#5A6B5D] dark:text-[#90A993] text-sm leading-relaxed">
                   <p>
                     Pivot was built with a simple philosophy: your personal reflections should remain yours.
                   </p>
                   <div className="space-y-2">
-                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-[#7A857C]">No Storage</h3>
+                    <h3 className="font-bold uppercase tracking-widest text-[10px] text-[#7A857C] dark:text-[#A0A9A2]">No Storage</h3>
                     <p>We do not store the situations you describe or the thoughts you share in follow-up conversations. They exist only for the duration of your session.</p>
                   </div>
                   <div className="space-y-2">
