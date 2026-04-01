@@ -26,6 +26,7 @@ import {
   Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI, Modality } from "@google/genai";
 import { auth, db } from './firebase';
 import { 
   GoogleAuthProvider, 
@@ -171,6 +172,8 @@ const MODES: { id: Mode; icon: React.ReactNode; description: string }[] = [
   { id: 'Calm', icon: <Wind className="w-4 h-4" />, description: 'Steady, soothing, grounding' },
   { id: 'Big Picture', icon: <Globe className="w-4 h-4" />, description: 'Reflective, thoughtful, perspective-based' },
 ];
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 const NEEDS: Need[] = [
   'A next step',
@@ -380,27 +383,20 @@ One Small Step:
 Question to Think About:
 [1 thoughtful follow-up question]`;
 
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemInstruction }),
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction,
+          temperature: 0.8,
+          topP: 0.95,
+          topK: 40,
+        },
       });
 
-      if (!response.ok) {
-        let errorMsg = 'Failed to get advice';
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.error || errorMsg;
-        } catch (e) {
-          errorMsg = `Server error: ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      const text = data.text || '';
+      const text = response.text || '';
       
-      if (!text) throw new Error('Received empty response from server');
+      if (!text) throw new Error('Received empty response from Gemini');
 
       // More robust parsing using regex to find sections regardless of exact formatting
       const insightMatch = text.match(/(?:Quick Insight:?|Insight:?)\s*([\s\S]*?)(?=\n\n|\nOne Small Step:|\nStep:|\nQuestion to Think About:|$)/i);
@@ -444,32 +440,27 @@ Provide a response in JSON format with two fields:
 Keep the tone calm, grounded, and consistent with the selected mode: ${mode}.
 Avoid clichés. Focus on helping the user move forward with clarity.`;
 
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemInstruction, responseMimeType: 'application/json' }),
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          temperature: 0.8,
+          topP: 0.95,
+          topK: 40,
+        },
       });
 
-      if (!response.ok) {
-        let errorMsg = 'Failed to get follow-up';
-        try {
-          const errorData = await response.json();
-          errorMsg = errorData.error || errorMsg;
-        } catch (e) {
-          errorMsg = `Server error: ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
+      const text = response.text || '';
       try {
-        const parsedData = JSON.parse(data.text || '{}');
+        const parsedData = JSON.parse(text || '{}');
         setFollowUp(parsedData);
       } catch (e) {
-        console.error("Failed to parse JSON response:", data.text);
+        console.error("Failed to parse JSON response:", text);
         // Fallback if model doesn't return valid JSON despite instruction
         setFollowUp({
-          finalThought: data.text?.substring(0, 200) || "I've processed your thoughts. Let's keep moving forward.",
+          finalThought: text?.substring(0, 200) || "I've processed your thoughts. Let's keep moving forward.",
           mantra: "Stay focused on your path."
         });
       }
@@ -589,28 +580,24 @@ Avoid clichés. Focus on helping the user move forward with clarity.`;
         'Big Picture': 'Kore'
       };
 
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: text,
-          responseModalities: ['AUDIO'],
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: voiceMap[mode] || 'Kore' },
             },
           },
-        }),
+        },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate audio');
-      }
-
-      const data = await response.json();
-      const base64Audio = data.audio;
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
         await playPCM(base64Audio);
+      } else {
+        throw new Error('No audio data returned from Gemini');
       }
     } catch (error) {
       console.error("Error generating speech:", error);
